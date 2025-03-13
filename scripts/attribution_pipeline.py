@@ -8,7 +8,7 @@ import numpy as np
 import os
 
 # Constants for IHC API limits
-MAX_SESSIONS_PER_IHC_REQUEST = 3000
+MAX_SESSIONS_PER_IHC_REQUEST = 200 # We have limit for Free Plan.
 MAX_CONVERSIONS_PER_IHC_REQUEST = 100
 
 # Configuration
@@ -74,56 +74,38 @@ def extract_customer_journeys():
 
 def create_chunks_of_customer_journeys(df_cjs):
     """
-    Chunks customer journey dataframe into chunks respecting API limits.
+    Chunks customer journey dataframe into chunks of 200 or fewer sessions.
+    Each chunk contains sessions for a single conversion only.
     """
     print("Creating chunks of customer journeys...")
     
     # Group by conversion ID and count sessions
-    df_cjs_sessions_per_order = df_cjs.groupby("conversion_id").agg({"session_id": "count"}).reset_index()
+    df_sessions_per_conversion = df_cjs.groupby("conversion_id").size().reset_index(name='session_count')
     
-    # Check for conversions with too many sessions
-    cjs_with_too_many_sessions = df_cjs_sessions_per_order[
-        df_cjs_sessions_per_order.session_id > MAX_SESSIONS_PER_IHC_REQUEST
-    ].conversion_id.unique()
+    # Sort conversions by session count (smallest first)
+    df_sessions_per_conversion = df_sessions_per_conversion.sort_values('session_count')
     
-    if len(cjs_with_too_many_sessions) > 0:
-        print(f"Excluding {len(cjs_with_too_many_sessions)} conversions with too many sessions")
-        df_cjs = df_cjs[~df_cjs.conversion_id.isin(cjs_with_too_many_sessions)]
-        df_cjs_sessions_per_order = df_cjs.groupby("conversion_id").agg({"session_id": "count"}).reset_index()
+    # Initialize list to store chunks
+    chunks = []
     
-    # Add cumulative sessions for chunking
-    df_cjs_sessions_per_order["cumulative_sessions"] = df_cjs_sessions_per_order["session_id"].cumsum()
+    # Process each conversion
+    for _, row in df_sessions_per_conversion.iterrows():
+        conv_id = row['conversion_id']
+        session_count = row['session_count']
+        
+        # Get all sessions for this conversion
+        conv_sessions = df_cjs[df_cjs['conversion_id'] == conv_id]
+        
+        if session_count <= MAX_SESSIONS_PER_IHC_REQUEST:
+            # Conversion fits in one chunk
+            chunks.append(conv_sessions.to_dict('records'))
+        else:
+            # Need to skip or split this conversion
+            print(f"Warning: Conversion {conv_id} has {session_count} sessions, which exceeds the limit of {MAX_SESSIONS_PER_IHC_REQUEST}.")
+            print(f"This conversion will be excluded.")
     
-    cjs_request = []
-    chunk_size_so_far = 0
-    
-    # Create chunks
-    while True:
-        max_cumulative_sessions = MAX_SESSIONS_PER_IHC_REQUEST + chunk_size_so_far
-        
-        df_current_chunk = df_cjs_sessions_per_order[
-            df_cjs_sessions_per_order.cumulative_sessions.between(
-                chunk_size_so_far + 1, max_cumulative_sessions
-            )
-        ]
-        
-        # Limit chunks to max allowed conversions
-        if df_current_chunk.conversion_id.nunique() > MAX_CONVERSIONS_PER_IHC_REQUEST:
-            df_current_chunk = df_current_chunk.iloc[:MAX_CONVERSIONS_PER_IHC_REQUEST]
-        
-        if len(df_current_chunk) == 0:
-            break
-        
-        chunk_size_so_far += df_current_chunk.session_id.sum()
-        
-        # Get journeys for these conversions
-        df_cj_request_chunk = df_cjs[df_cjs.conversion_id.isin(df_current_chunk.conversion_id)]
-        
-        # Convert to list of dicts for API
-        cjs_request.append(df_cj_request_chunk.to_dict("records"))
-    
-    print(f"Created {len(cjs_request)} chunks")
-    return cjs_request
+    print(f"Created {len(chunks)} chunks")
+    return chunks
 
 def send_to_ihc_api(chunks):
     """Send chunks to IHC API and collect responses"""
