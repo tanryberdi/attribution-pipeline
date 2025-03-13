@@ -91,43 +91,6 @@ def extract_customer_journeys(start_date=None, end_date=None):
     conn.close()
     return df
 
-'''
-def create_chunks_of_customer_journeys(df_cjs):
-    """
-    Chunks customer journey dataframe into chunks of 200 or fewer sessions.
-    Each chunk contains sessions for a single conversion only.
-    """
-    print("Creating chunks of customer journeys...")
-    
-    # Group by conversion ID and count sessions
-    df_sessions_per_conversion = df_cjs.groupby("conversion_id").size().reset_index(name='session_count')
-    
-    # Sort conversions by session count (smallest first)
-    df_sessions_per_conversion = df_sessions_per_conversion.sort_values('session_count')
-    
-    # Initialize list to store chunks
-    chunks = []
-    
-    # Process each conversion
-    for _, row in df_sessions_per_conversion.iterrows():
-        conv_id = row['conversion_id']
-        session_count = row['session_count']
-        
-        # Get all sessions for this conversion
-        conv_sessions = df_cjs[df_cjs['conversion_id'] == conv_id]
-        
-        if session_count <= MAX_SESSIONS_PER_IHC_REQUEST:
-            # Conversion fits in one chunk
-            chunks.append(conv_sessions.to_dict('records'))
-        else:
-            # Need to skip or split this conversion
-            print(f"Warning: Conversion {conv_id} has {session_count} sessions, which exceeds the limit of {MAX_SESSIONS_PER_IHC_REQUEST}.")
-            print(f"This conversion will be excluded.")
-    
-    print(f"Created {len(chunks)} chunks")
-    return chunks'
-'''
-
 def create_chunks_of_customer_journeys(df_cjs):
     """
     Chunks customer journey dataframe into chunks respecting API limits.
