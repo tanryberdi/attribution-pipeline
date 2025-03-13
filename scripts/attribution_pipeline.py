@@ -17,8 +17,15 @@ IHC_API_KEY = '46544c43-5683-4fde-aff0-66135c712369'
 CONV_TYPE_ID = 'all_markets' 
 OUTPUT_PATH = 'channel_reporting.csv'
 
-def extract_customer_journeys():
-    """Extract customer journeys from database"""
+
+def extract_customer_journeys(start_date=None, end_date=None):
+    """
+    Extract customer journeys from database with optional time range filtering.
+    
+    Args:
+        start_date: Optional start date in 'YYYY-MM-DD' format
+        end_date: Optional end date in 'YYYY-MM-DD' format
+    """
     print("Connecting to database...")
     conn = sqlite3.connect(DB_PATH)
     
@@ -40,7 +47,19 @@ def extract_customer_journeys():
         JOIN 
             session_sources ss ON c.user_id = ss.user_id
         WHERE 
-            ss.event_date || ' ' || ss.event_time <= c.conv_date || ' ' || c.conv_time
+            datetime(ss.event_date || ' ' || ss.event_time) <= datetime(c.conv_date || ' ' || c.conv_time)
+    """
+    
+    # Add time range filtering if provided
+    if start_date and end_date:
+        query += f" AND c.conv_date BETWEEN '{start_date}' AND '{end_date}'"
+    elif start_date:
+        query += f" AND c.conv_date >= '{start_date}'"
+    elif end_date:
+        query += f" AND c.conv_date <= '{end_date}'"
+    
+    # Complete the query
+    query += """
     )
     SELECT
         conversion_id,
@@ -283,12 +302,27 @@ def export_final_report(output_path="channel_reporting.csv"):
     
     return channel_reporting
 
-def run_attribution_pipeline():
-    """Run the complete attribution pipeline"""
+def run_attribution_pipeline(start_date=None, end_date=None):
+    """
+    Run the complete attribution pipeline with optional time range filtering.
+    
+    Args:
+        start_date: Optional start date in 'YYYY-MM-DD' format
+        end_date: Optional end date in 'YYYY-MM-DD' format
+    """
     print("Starting attribution pipeline...")
     
-    # Step 1: Extract customer journeys
-    customer_journeys_df = extract_customer_journeys()
+    if start_date and end_date:
+        print(f"Processing data for time range: {start_date} to {end_date}")
+    elif start_date:
+        print(f"Processing data from {start_date} onwards")
+    elif end_date:
+        print(f"Processing data up to {end_date}")
+    else:
+        print("Processing all available data")
+    
+    # Step 1: Extract customer journeys with time range filtering
+    customer_journeys_df = extract_customer_journeys(start_date, end_date)
     
     
     # Step 2: Chunk data and send to API
@@ -303,8 +337,16 @@ def run_attribution_pipeline():
     
     # Step 5: Export final report with CPO and ROAS
     export_final_report()
-    
+
     print("Attribution pipeline completed successfully!")
 
 if __name__ == "__main__":
-    run_attribution_pipeline()
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='Run attribution pipeline with optional time range')
+    parser.add_argument('--start_date', help='Start date in YYYY-MM-DD format')
+    parser.add_argument('--end_date', help='End date in YYYY-MM-DD format')
+    
+    args = parser.parse_args()
+    
+    run_attribution_pipeline(args.start_date, args.end_date)
