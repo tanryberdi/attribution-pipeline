@@ -13,8 +13,8 @@ MAX_CONVERSIONS_PER_IHC_REQUEST = 100
 
 # Configuration
 DB_PATH = 'data/challenge.db'  # Adjust path as needed
-IHC_API_KEY = '46544c43-5683-4fde-aff0-66135c712369'  
-CONV_TYPE_ID = 'all_markets' 
+IHC_API_KEY = 'a236ecf4-050c-47d1-86b8-44e98c77f3b8'  
+CONV_TYPE_ID = 'all_markets_eu' 
 OUTPUT_PATH = 'channel_reporting.csv'
 
 
@@ -91,6 +91,7 @@ def extract_customer_journeys(start_date=None, end_date=None):
     conn.close()
     return df
 
+'''
 def create_chunks_of_customer_journeys(df_cjs):
     """
     Chunks customer journey dataframe into chunks of 200 or fewer sessions.
@@ -124,6 +125,78 @@ def create_chunks_of_customer_journeys(df_cjs):
             print(f"This conversion will be excluded.")
     
     print(f"Created {len(chunks)} chunks")
+    return chunks'
+'''
+
+def create_chunks_of_customer_journeys(df_cjs):
+    """
+    Chunks customer journey dataframe into chunks respecting API limits.
+    Each chunk can contain multiple conversions up to MAX_CONVERSIONS_PER_IHC_REQUEST,
+    but total sessions per chunk must not exceed 200 (free tier limit).
+    """
+    print("Creating chunks of customer journeys...")
+    
+    # Group by conversion ID and count sessions
+    df_sessions_per_conversion = df_cjs.groupby("conversion_id").size().reset_index(name='session_count')
+    
+    # Filter to only include conversions with <= 200 sessions (API limit)
+    valid_conversions = df_sessions_per_conversion[df_sessions_per_conversion['session_count'] <= 200]
+    
+    if len(valid_conversions) < len(df_sessions_per_conversion):
+        excluded_count = len(df_sessions_per_conversion) - len(valid_conversions)
+        print(f"Warning: Excluding {excluded_count} conversions with more than 200 sessions")
+    
+    # Sort by session count (largest first to optimize packing)
+    valid_conversions = valid_conversions.sort_values('session_count', ascending=False)
+    
+    # Initialize chunks
+    chunks = []
+    current_chunk_conversions = []
+    current_chunk_sessions = 0
+    
+    # Pack conversions into chunks
+    for _, row in valid_conversions.iterrows():
+        conv_id = row['conversion_id']
+        session_count = row['session_count']
+        
+        # If adding this conversion would exceed session limit, start a new chunk
+        if current_chunk_sessions + session_count > 200:
+            # If we have conversions for the current chunk, add it to chunks
+            if current_chunk_conversions:
+                # Get all sessions for these conversions
+                chunk_data = df_cjs[df_cjs['conversion_id'].isin(current_chunk_conversions)]
+                chunks.append(chunk_data.to_dict('records'))
+                
+                # Reset for next chunk
+                current_chunk_conversions = []
+                current_chunk_sessions = 0
+        
+        # If adding this conversion would exceed conversion limit, start a new chunk
+        if len(current_chunk_conversions) >= MAX_CONVERSIONS_PER_IHC_REQUEST:
+            # Get all sessions for these conversions
+            chunk_data = df_cjs[df_cjs['conversion_id'].isin(current_chunk_conversions)]
+            chunks.append(chunk_data.to_dict('records'))
+            
+            # Reset for next chunk
+            current_chunk_conversions = []
+            current_chunk_sessions = 0
+        
+        # Add this conversion to the current chunk
+        current_chunk_conversions.append(conv_id)
+        current_chunk_sessions += session_count
+    
+    # Add the last chunk if it has any conversions
+    if current_chunk_conversions:
+        chunk_data = df_cjs[df_cjs['conversion_id'].isin(current_chunk_conversions)]
+        chunks.append(chunk_data.to_dict('records'))
+    
+    print(f"Created {len(chunks)} chunks with up to {MAX_CONVERSIONS_PER_IHC_REQUEST} conversions per chunk")
+    
+    # Log detailed chunk info
+    for i, chunk in enumerate(chunks):
+        conv_ids = set([item['conversion_id'] for item in chunk])
+        print(f"  Chunk {i+1}: {len(conv_ids)} conversions, {len(chunk)} sessions")
+    
     return chunks
 
 def send_to_ihc_api(chunks):
@@ -323,6 +396,7 @@ def run_attribution_pipeline(start_date=None, end_date=None):
     
     # Step 1: Extract customer journeys with time range filtering
     customer_journeys_df = extract_customer_journeys(start_date, end_date)
+    #customer_journeys_df.to_json('customer_journeys.json', orient='records')
     
     
     # Step 2: Chunk data and send to API
