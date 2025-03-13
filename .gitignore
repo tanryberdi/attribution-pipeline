@@ -30,3 +30,6 @@ Temporary Items
 
 # ignore db file
 *.db
+
+# request payloads
+request_payloads/
